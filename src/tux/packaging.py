@@ -117,19 +117,11 @@ case "$1" in
                 echo "tux: provisioning did not complete; run 'tux provision' later." >&2
             fi
         else
-            # Unattended (no TTY, or DEBIAN_FRONTEND=noninteractive): never
-            # prompt. Only proceed if consent was preseeded ahead of time.
-            db_get tux/provision-now || RET=false
-            if [ "$RET" = "true" ]; then
-                # Consent was preseeded, so invoke 8a's provisioning brain with
-                # it recorded (--yes), reading from /dev/null so this never
-                # blocks on input.
-                if ! {provision_command}; then
-                    echo "tux: provisioning did not complete; run 'tux provision' later." >&2
-                fi
-            else
-                # Lowest-risk path: defer the consent and setup to first run.
-                echo "tux: installed. Run 'tux provision' to set up your local model." >&2
+            # Unattended (no TTY, or DEBIAN_FRONTEND=noninteractive): provision
+            # without prompting. --yes records consent, and /dev/null guarantees
+            # the command cannot block waiting for input.
+            if ! {provision_command}; then
+                echo "tux: automatic provisioning failed; run 'tux provision --yes' later." >&2
             fi
         fi
         ;;

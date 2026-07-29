@@ -22,7 +22,7 @@ from tux.config import (
     resolved_settings,
     set_value,
 )
-from tux.provision import ProvisionResult, managed_local_runtime, provision
+from tux.provisioning.main import ProvisionResult, managed_local_runtime, provision
 from tux.runner import (
     CommandRunner,
     RunRecord,
