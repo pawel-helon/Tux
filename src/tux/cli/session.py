@@ -1,34 +1,24 @@
 """Command-line entry point for the ``tux`` console command."""
 
-import argparse
 import os
 import readline
-import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from contextlib import nullcontext
 
-from tux import __version__
 from tux.client import DEFAULT_VARIANT, DEFAULTS, ModelClient, ModelClientError
 from tux.modes.chat import explain_request
 from tux.modes.command import CommandSuggestion, Plan, assistant_turn, output_message
 from tux.chooser import Chooser, read_line, select, stop_watch
 from tux.config import (
-    ALLOWED_KEYS,
     ConfigError,
-    config_path,
     load_config,
-    resolved_settings,
-    set_value,
 )
-from tux.provisioning.main import ProvisionResult, managed_local_runtime, provision
+from tux.provisioning.main import managed_local_runtime
 from tux.runner import (
     CommandRunner,
-    RunRecord,
     append_run,
-    clear_runs,
-    read_runs,
     run_command,
 )
 from tux.safety import destructive_reason
@@ -244,172 +234,16 @@ def _resolve_variant() -> str:
     """
     return load_config().get("variant", DEFAULT_VARIANT)
 
-CONFIG_DESCRIPTION = (
-    "Inspect and change tux's endpoint, model, capability variant, and Linux environment."
-)
-
-#: Help line shown in ``tux --help``; points the reader at the fuller help.
-CONFIG_HELP = f"{CONFIG_DESCRIPTION} Run `config --help` for more."
-
-PROVISION_DESCRIPTION = (
-    "Detect this Linux environment, assess the machine's hardware, ensure the "
-    "Ollama runtime, pull a suitable model, and write tux's config."
-)
-
-HISTORY_DESCRIPTION = (
-    "List the commands tux has run, re-run one by its number, or clear the log."
-)
-
-#: Help line shown in ``tux --help``; points the reader at the fuller help.
-HISTORY_HELP = f"{HISTORY_DESCRIPTION} Run `history --help` for more."
-
-#: Fuller ``tux history --help`` body spelling out the three things it does.
-HISTORY_LONG_DESCRIPTION = (
-    f"{HISTORY_DESCRIPTION}\n\n"
-    "With no argument it lists the runs recorded in tux's run log, oldest first, "
-    "each numbered with the exact command and its one-line description. Give a "
-    "number (optionally '!'-prefixed, e.g. 3 or '!3') to re-run that recorded "
-    "command: it is re-staged through tux's normal propose/run path — the command "
-    "is shown with any destructive warning and you choose run or dismiss, so "
-    "nothing runs until you say so. Use --clear to empty the log."
-)
-
-#: Shown when the run log holds no records yet (missing, empty, or just cleared).
-HISTORY_EMPTY = "tux has not recorded any runs yet."
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the argument parser for the ``tux`` command."""
-    parser = argparse.ArgumentParser(
-        prog="tux",
-        description=DESCRIPTION,
-        epilog=EXAMPLE,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"tux {__version__}",
-    )
-    subparsers = parser.add_subparsers(dest="command", metavar="command")
-    ask_parser = subparsers.add_parser(
-        "ask",
-        help=ASK_DESCRIPTION,
-        description=ASK_DESCRIPTION,
-    )
-    ask_parser.add_argument(
-        "question",
-        nargs="?",
-        help="The plain-English question to ask tux. Omit it to start an "
-        "interactive session where you can ask follow-up questions.",
-    )
-    ask_parser.add_argument(
-        "--new",
-        action="store_true",
-        help="Start a fresh conversation in this terminal, discarding any prior "
-        "context from earlier questions in this shell.",
-    )
-    _add_config_parser(subparsers)
-    _add_provision_parser(subparsers)
-    _add_history_parser(subparsers)
-    return parser
 
 
-def _config_description() -> str:
-    """Return the ``config`` subcommand description, noting where the file lives."""
-    return f"{CONFIG_DESCRIPTION}\n\nThe config file lives at {config_path()}."
 
 
-def _add_config_parser(subparsers: argparse._SubParsersAction) -> None:
-    """Add the ``config`` subcommand with its ``show`` / ``set`` / ``path`` actions."""
-    config_parser = subparsers.add_parser(
-        "config",
-        help=CONFIG_HELP,
-        description=_config_description(),
-        epilog=(
-            "settings:\n"
-            "  endpoint  OpenAI-compatible model-server base URL\n"
-            "  model     Model name sent to the server\n"
-            "  variant   Capability tier: lite, mid, or full\n"
-            "  system    Linux environment: linux or termux\n\n"
-            "examples:\n"
-            "  tux config set model qwen2.5-coder:3b\n"
-            "  tux config set system termux"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    actions = config_parser.add_subparsers(
-        dest="config_command", metavar="action", required=True
-    )
-    actions.add_parser(
-        "show",
-        help="Show every effective setting and where it comes from.",
-        description="Show every effective setting and where it comes from.",
-    )
-    actions.add_parser(
-        "path",
-        help="Print the path tux uses for its config file.",
-        description="Print the path tux uses for its config file.",
-    )
-    set_parser = actions.add_parser(
-        "set",
-        help="Set a config value, creating the config file if needed.",
-        description="Set a config value, creating the config file if needed.",
-    )
-    set_parser.add_argument("key", choices=ALLOWED_KEYS, help="The config key to set.")
-    set_parser.add_argument("value", help="The value to store for the key.")
 
 
-def _add_provision_parser(subparsers: argparse._SubParsersAction) -> None:
-    """Add the ``provision`` subcommand for the guided, re-runnable install."""
-    provision_parser = subparsers.add_parser(
-        "provision",
-        help=PROVISION_DESCRIPTION,
-        description=PROVISION_DESCRIPTION,
-    )
-    provision_parser.add_argument(
-        "--yes",
-        action="store_true",
-        help="Treat runtime-install and model-download consent as already granted; "
-        "do not prompt. Use for an unattended install with consent preseeded.",
-    )
-    provision_parser.add_argument(
-        "--variant",
-        choices=("lite", "mid", "full"),
-        help="Pin the tier instead of probing hardware, forcing any of the three "
-        "tiers (lite/mid/full) against the host and writing it to config, so a "
-        "human can override what the probe would otherwise pick.",
-    )
 
 
-def _add_history_parser(subparsers: argparse._SubParsersAction) -> None:
-    """Add the ``history`` subcommand for listing, re-running, and clearing runs."""
-    history_parser = subparsers.add_parser(
-        "history",
-        help=HISTORY_HELP,
-        description=HISTORY_LONG_DESCRIPTION,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    history_parser.add_argument(
-        "entry",
-        nargs="?",
-        help="Re-run the recorded command with this number, as shown by `tux "
-        "history`. A leading '!' is accepted (e.g. 3 or '!3'); quote the '!' form "
-        "so your shell does not expand it. The command is re-staged through the "
-        "normal propose/run path — nothing runs until you choose run.",
-    )
-    history_parser.add_argument(
-        "-n",
-        "--limit",
-        type=int,
-        metavar="N",
-        help="When listing, show only the most recent N runs instead of all.",
-    )
-    history_parser.add_argument(
-        "--clear",
-        action="store_true",
-        help="Empty the run log, discarding every recorded run.",
-    )
 
 
 def run_ask(
@@ -1090,274 +924,25 @@ def run_session(
         history.append(assistant)
 
 
-def main(
-    argv: list[str] | None = None,
-    client: ModelClient | None = None,
-    runner: CommandRunner = run_command,
-    chooser: Chooser = select,
-    reader: ClarifyReader = _default_reader,
-    editor: EditReader = _default_edit_reader,
-) -> int:
-    """Run the ``tux`` command-line interface.
-
-    Args:
-        argv: Command-line arguments; defaults to ``sys.argv[1:]`` when ``None``.
-        client: Model client for the ``ask`` flow; injected in tests so the flow
-            can run without a live endpoint. Defaults to one built from the
-            environment.
-        runner: Callable that executes a chosen step; injected in tests so the
-            run path is exercised without spawning a real process.
-        chooser: Callable presenting the per-step menu; injected in tests so the
-            choice is driven without a real terminal.
-        reader: Callable reading the clarify free text; injected in tests so the
-            clarify re-plan runs without a real terminal.
-        editor: Callable reading the inline-edited command; injected in tests so
-            the edit path runs without a real terminal.
-
-    Returns:
-        Process exit status.
-    """
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    if args.command == "ask":
-        # ``--version`` and ``--help`` are handled (and exit) inside parse_args.
-        # No question given starts an interactive, multi-turn session; a supplied
-        # question keeps the one-shot path intact for scripting/piping.
-        if args.question is None:
-            return run_session(client, runner, chooser, reader, editor)
-        return run_ask(
-            args.question, client, new=args.new, runner=runner, chooser=chooser,
-            reader=reader, editor=editor,
-        )
-    if args.command == "config":
-        return run_config(args)
-    if args.command == "provision":
-        return run_provision(args)
-    if args.command == "history":
-        return run_history(args, runner=runner, chooser=chooser)
-    # No subcommand was given, so show the help to keep the tool self-explanatory.
-    parser.print_help()
-    return 0
 
 
-def run_config(args: argparse.Namespace) -> int:
-    """Dispatch a ``tux config`` action and report the result.
-
-    Args:
-        args: Parsed arguments carrying ``config_command`` and, for ``set``, the
-            ``key`` and ``value`` to persist.
-
-    Returns:
-        ``0`` on success, ``1`` if the config file is malformed or the key is
-        rejected.
-    """
-    if args.config_command == "show":
-        return _config_show()
-    if args.config_command == "set":
-        return _config_set(args.key, args.value)
-    # ``path`` is the only remaining action; the parser rejects anything else.
-    print(config_path())
-    return 0
 
 
-def _config_show() -> int:
-    """Print each effective setting with whether it came from the file or default."""
-    try:
-        settings = resolved_settings(DEFAULTS)
-    except ConfigError as exc:
-        print(f"tux: {exc}", file=sys.stderr)
-        return 1
-    for key, value, source in settings:
-        print(f"{key} = {value}  ({source})")
-    return 0
 
 
-def _config_set(key: str, value: str) -> int:
-    """Persist ``key = value`` to the config file, reporting any rejection."""
-    try:
-        set_value(key, value)
-    except ConfigError as exc:
-        print(f"tux: {exc}", file=sys.stderr)
-        return 1
-    return 0
 
 
-def run_provision(args: argparse.Namespace) -> int:
-    """Run the guided, re-runnable provisioning and report what it did.
-
-    Consent is interactive only when tux is attached to a terminal; a piped or
-    redirected (unattended) run never prompts — it defers the model pull to first
-    run unless ``--yes`` preseeds consent — so the install never hangs.
-
-    Returns:
-        ``0`` on success; ``1`` if a provisioning step (install, pull, or config
-        write) fails.
-    """
-    try:
-        result = provision(
-            interactive=_interactive(), assume_yes=args.yes, pin=args.variant
-        )
-    except (OSError, subprocess.CalledProcessError, ConfigError) as exc:
-        print(f"tux: provisioning failed: {exc}", file=sys.stderr)
-        return 1
-    _print_provision_result(result)
-    return 0
 
 
-def _print_provision_result(result: ProvisionResult) -> None:
-    """Print a human summary of a provisioning run."""
-    if result.bypassed:
-        print(
-            "tux is already pointed at a configured endpoint "
-            f"({result.endpoint}); skipping provisioning."
-        )
-        return
-    if not result.ollama_ready:
-        print(
-            "The Ollama runtime is not installed, so provisioning stopped there "
-            "(no model tier was chosen and nothing was downloaded). Run 'tux "
-            "provision' again to be asked, or 'tux provision --yes' to install "
-            "it and continue."
-        )
-        return
-    if result.decision is not None:
-        print(f"Selected the {result.tier.capability} tier ({result.variant}):")
-        for reason in result.decision.reasons:
-            print(f"  - {reason}")
-    print(f"Detected system: {result.system}.")
-    if result.ollama_installed:
-        print("Installed the Ollama runtime.")
-    if result.ollama_server_started:
-        print("Started the Ollama server for this provisioning run.")
-    if result.model_pulled:
-        print(f"Pulled model {result.model}.")
-    elif result.model_deferred:
-        print(
-            f"Deferred the download of {result.model} to first run "
-            "(no consent given yet)."
-        )
-    else:
-        print(f"Model {result.model} already present.")
-    if result.endpoint_reachable is False:
-        print(f"warning: endpoint {result.endpoint} is not reachable yet.")
-    print(
-        f"Config now points at {result.endpoint} "
-        f"(model {result.model}, system {result.system})."
-    )
 
 
-def run_history(
-    args: argparse.Namespace,
-    *,
-    runner: CommandRunner = run_command,
-    chooser: Chooser = select,
-) -> int:
-    """Dispatch a ``tux history`` invocation: clear, re-run an entry, or list.
-
-    ``--clear`` empties the log and wins over the others; otherwise an ``entry``
-    reference re-stages that recorded command, and with neither the active log is
-    listed (optionally limited to the most recent ``-n`` runs).
-
-    Returns:
-        ``0`` on a successful list or clear, ``0`` when a re-run dismisses or runs
-        cleanly (or the run's own exit status), and ``1`` for a bad re-run
-        reference.
-    """
-    if args.clear:
-        clear_runs()
-        return 0
-    if args.entry is not None:
-        return _history_rerun(args.entry, runner, chooser)
-    return _history_list(args.limit)
 
 
-def _history_list(limit: int | None) -> int:
-    """Print the active run log, numbered chronologically; honor a recent-N limit.
-
-    Numbers are positional within the active log (entry 1 is the oldest record),
-    so a ``-n`` limit shows a tail with those same numbers preserved — the number
-    a user reads is the number ``tux history <n>`` re-runs. An empty or missing
-    log prints a friendly note and still exits 0.
-    """
-    records = read_runs()
-    if not records:
-        print(HISTORY_EMPTY)
-        return 0
-    numbered = list(enumerate(records, start=1))
-    if limit is not None:
-        numbered = numbered[-limit:] if limit > 0 else []
-    styled = _interactive()
-    for number, record in numbered:
-        _print_history_entry(number, record, styled=styled)
-    return 0
 
 
-def _print_history_entry(number: int, record: RunRecord, *, styled: bool) -> None:
-    """Render one numbered run entry: ``N. <command> — <description>``.
-
-    For a learning tool the *why* — the command's one-line description — is the
-    teaching payload, so the entry pairs the command with its description and
-    drops the timestamp and exit status from the display (both stay stored and
-    still drive re-run). A pre-change entry with no stored description shows the
-    :data:`NO_DESCRIPTION` placeholder in the description position. At a terminal
-    the line carries the established styling — a dim number, the command in the
-    command style, and the description dimmed — so the listing matches tux's other
-    output; piped or redirected it is plain text with no escape sequences so it
-    stays script-friendly.
-    """
-    if not styled:
-        print(f"{number}. {record.command} — {record.description}")
-        return
-    print(
-        f"{_LABEL_STYLE}{number}.{_RESET} "
-        f"{_COMMAND_STYLE}{record.command}{_RESET} "
-        f"{_LABEL_STYLE}— {record.description}{_RESET}"
-    )
 
 
-def _history_rerun(reference: str, runner: CommandRunner, chooser: Chooser) -> int:
-    """Re-stage the recorded command named by ``reference`` through the normal run path.
-
-    The reference is a 1-based number (optionally ``!``-prefixed) into the active
-    log. The recorded command is wrapped in a single-command proposal and run
-    through the same staging tail as a fresh suggestion — destructive flagging,
-    the run/dismiss chooser, the command runner, and the run-log append — with no
-    model call, so the command text is exactly what was logged. The re-staged
-    proposal inherits the source entry's description, so the re-logged run carries
-    that real description (never a synthesized string) and lists with it. A
-    reference that is non-numeric, out of range, or used against an empty log
-    prints a friendly
-    error, runs nothing, and exits non-zero.
-    """
-    records = read_runs()
-    index = _parse_reference(reference)
-    if index is None or not (1 <= index <= len(records)):
-        print(f"tux: no recorded run #{reference}", file=sys.stderr)
-        return 1
-    record = records[index - 1]
-    suggestion = CommandSuggestion(
-        title=f"Re-running #{index}",
-        command=record.command,
-        description=record.description,
-    )
-    status, _ = _present_single_command([suggestion], runner, chooser)
-    return status
 
 
-def _parse_reference(reference: str) -> int | None:
-    """Parse a re-run reference into a positive 1-based index, or ``None``.
-
-    A single optional leading ``!`` is stripped (so ``3`` and ``!3`` are the same
-    reference); the remainder must be a plain positive integer. Anything else —
-    empty, non-numeric, zero, or negative — yields ``None`` for the caller to
-    reject.
-    """
-    text = reference[1:] if reference.startswith("!") else reference
-    if not text.isdigit():
-        return None
-    value = int(text)
-    return value if value > 0 else None
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
