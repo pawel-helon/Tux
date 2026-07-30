@@ -1,2 +1,0 @@
-[console_scripts]
-tux = tux.cli:main
