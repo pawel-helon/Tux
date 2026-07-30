@@ -10,7 +10,7 @@ from tux.runner import CommandRunner, run_command
 
 from .commands import run_config, run_history, run_provision
 from .parser import build_parser
-from .session import (
+from .session.main import (
     ClarifyReader,
     EditReader,
     _default_edit_reader,
