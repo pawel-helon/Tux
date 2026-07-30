@@ -17,6 +17,7 @@ stray keystroke.
 
 import contextlib
 import select as _select
+import shutil
 import sys
 import termios
 import tty
@@ -60,7 +61,7 @@ def select(options: Sequence[str], *, default: int = 0) -> int:
     saved = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
-        _draw(options, index)
+        drawn_lines = _draw(options, index)
         while True:
             key = _read_key()
             if key in _ENTER:
@@ -75,7 +76,7 @@ def select(options: Sequence[str], *, default: int = 0) -> int:
                 index = (index + 1) % len(options)
             else:
                 continue
-            _draw(options, index)
+            drawn_lines = _draw(options, index, previous_lines=drawn_lines)
     except KeyboardInterrupt:
         return default
     finally:
@@ -185,22 +186,41 @@ def stop_watch() -> Iterator[Callable[[], bool]]:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
 
-def _draw(options: Sequence[str], index: int) -> None:
-    """Render the options as a single row of bracketed buttons, in place.
+def _draw(
+    options: Sequence[str],
+    index: int,
+    *,
+    previous_lines: int = 0,
+) -> int:
+    """Render the button row in place and return its physical line count.
 
-    Each option is shown as ``[ label ]``; the selected button is drawn in
-    inverse video so the highlight tracks the left/right keys. The row is
-    repainted from column zero on each keypress — carriage return, then clear to
-    end of line — so a keystroke overwrites the same line rather than scrolling.
+    A long row can wrap across several terminal lines. Before repainting, clear
+    every physical line occupied by the previous rendering; clearing only from
+    the cursor to the end of its current line leaves wrapped copies behind.
     """
-    buttons = []
-    for i, option in enumerate(options):
-        button = f"[ {option} ]"
-        if i == index:
-            button = f"{_INVERSE}{button}{_RESET}"
-        buttons.append(button)
-    sys.stdout.write("\r" + " ".join(buttons) + "\x1b[K")
+    plain_buttons = [f"[ {option} ]" for option in options]
+    rendered_buttons = [
+        f"{_INVERSE}{button}{_RESET}" if i == index else button
+        for i, button in enumerate(plain_buttons)
+    ]
+    plain_row = " ".join(plain_buttons)
+    rendered_row = " ".join(rendered_buttons)
+
+    if previous_lines:
+        # The cursor is at the end of the previous rendering. Clear its complete
+        # wrapped block, then return to the block's first physical line.
+        sys.stdout.write("\r" + "\x1b[1A" * (previous_lines - 1))
+        for line in range(previous_lines):
+            sys.stdout.write("\x1b[2K")
+            if line < previous_lines - 1:
+                sys.stdout.write("\x1b[1B\r")
+        sys.stdout.write("\x1b[1A" * (previous_lines - 1) + "\r")
+
+    sys.stdout.write(rendered_row)
     sys.stdout.flush()
+
+    columns = max(1, shutil.get_terminal_size(fallback=(80, 24)).columns)
+    return max(1, (len(plain_row) - 1) // columns + 1)
 
 
 def _read_key() -> str | None:
@@ -218,9 +238,9 @@ def _read_key() -> str | None:
         return None
 
     if char != _ESC:
-        if char in ("h", "k"):
+        if char in ("h", "j"):
             return "left"
-        if char in ("l", "j"):
+        if char in ("l", "k"):
             return "right"
         return char
 
