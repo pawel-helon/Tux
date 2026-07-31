@@ -1,64 +1,16 @@
-"""Per-terminal conversation threads persisted under the XDG state directory.
-
-Each one-shot ``tux ask`` process is short-lived, so context can only carry
-across invocations if it lives on disk. tux keys a thread to the parent shell's
-PID (``os.getppid()``): consecutive ``tux ask`` calls from the *same* terminal
-load that shell's thread, append the new turn, and save it, while a call from a
-different terminal (a different shell PID) uses its own file.
-
-Threads live at ``$XDG_STATE_HOME/tux/threads/<ppid>.json`` (falling back to
-``~/.local/state/tux/threads/<ppid>.json`` when ``XDG_STATE_HOME`` is unset).
-This is *state*, not config: the endpoint/model config (see :mod:`tux.config`)
-stays under ``$XDG_CONFIG_HOME`` and is untouched here.
-
-Because the OS eventually reuses shell PIDs, a thread is treated as fresh (an
-empty history) rather than resurrected when it is stale: either older than
-:data:`THREAD_TTL`, or recorded against a shell whose start time no longer
-matches the PID's current start time. Any missing, empty, or corrupt file also
-degrades to a fresh thread rather than raising.
-"""
+"""Per-terminal conversation thread persistence."""
 
 import json
-import os
 import time
 from pathlib import Path
+
+from .paths import thread_path
 
 #: Conversation messages older than this many seconds are treated as a fresh
 #: thread. Eight hours comfortably spans a working session while keeping a
 #: long-idle terminal — or a PID the OS has since reused — from resurrecting an
 #: unrelated conversation.
 THREAD_TTL = 8 * 60 * 60
-
-
-def state_dir() -> Path:
-    """Return tux's state directory, honoring ``XDG_STATE_HOME``.
-
-    The directory is returned whether or not it currently exists.
-    """
-    base = os.environ.get("XDG_STATE_HOME")
-    root = Path(base) if base else Path.home() / ".local" / "state"
-    return root / "tux"
-
-
-def thread_path(ppid: int) -> Path:
-    """Return the thread file path for the shell identified by ``ppid``."""
-    return state_dir() / "threads" / f"{ppid}.json"
-
-
-def log_path() -> Path:
-    """Return the path of tux's command run log under the state directory.
-
-    The log is the ``$XDG_STATE_HOME`` sibling of the conversation threads,
-    living at ``$XDG_STATE_HOME/tux/history.log`` (falling back to
-    ``~/.local/state/tux/history.log``). The path is returned whether or not the
-    file currently exists.
-    """
-    return state_dir() / "history.log"
-
-
-def ollama_pid_path() -> Path:
-    """Return the PID-file path for an Ollama server started by tux on Linux."""
-    return state_dir() / "ollama.pid"
 
 
 def load_thread(ppid: int) -> list[dict[str, str]]:
@@ -78,7 +30,7 @@ def load_thread(ppid: int) -> list[dict[str, str]]:
 
 
 def save_thread(ppid: int, history: list[dict[str, str]]) -> None:
-    """Persist ``history`` for ``ppid``, stamping the shell start time and clock.
+    """Persist ``history`` for ``ppid``, stamping shell start time and clock.
 
     The write is atomic (write a temp file, then replace) so a process killed
     mid-write cannot leave a half-written thread behind.
@@ -124,8 +76,6 @@ def _is_stale(data: dict, ppid: int) -> bool:
         return True
     recorded = data.get("shell_start")
     current = _shell_start(ppid)
-    # Only reject on a positive mismatch; if either start time is unavailable
-    # the TTL above remains the safeguard.
     return recorded is not None and current is not None and recorded != current
 
 
@@ -142,14 +92,7 @@ def _valid_history(history: object) -> bool:
 
 
 def _shell_start(pid: int) -> str | None:
-    """Return the process start time of ``pid`` from ``/proc``, or ``None``.
-
-    Field 22 of ``/proc/<pid>/stat`` is the start time in clock ticks since
-    boot, which distinguishes a live shell from a later process that reused its
-    PID. The comm field (field 2) may itself contain spaces and parentheses, so
-    parsing resumes after the final ``)``. Returns ``None`` off Linux or when
-    the entry cannot be read, leaving the TTL as the sole staleness guard.
-    """
+    """Return the process start time of ``pid`` from ``/proc``, or ``None``."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
     except OSError:
