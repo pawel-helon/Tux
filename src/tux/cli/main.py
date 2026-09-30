@@ -32,6 +32,8 @@ def main(
     """Run the ``tux`` command-line interface."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command is None:
+        return run_session(client, runner, chooser, reader, editor)
     if args.command == "ask":
         if args.question is None:
             return run_session(client, runner, chooser, reader, editor)

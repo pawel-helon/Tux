@@ -19,3 +19,16 @@ def http_stream(url: str, payload: dict, timeout: float) -> Iterator[str]:
     with urllib.request.urlopen(request, timeout=timeout) as response:
         for raw in response:
             yield raw.decode("utf-8")
+
+def http_post(url: str, payload: dict, timeout: float) -> dict:
+    """POST JSON and return the decoded JSON response."""
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))

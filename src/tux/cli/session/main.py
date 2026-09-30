@@ -82,25 +82,41 @@ def run_ask(
         except (ConfigError, OSError, subprocess.CalledProcessError, RuntimeError) as exc:
             print(f"tux: {exc}", file=sys.stderr)
             return 1
+
     try:
         variant = _resolve_variant()
     except ConfigError as exc:
         print(f"tux: {exc}", file=sys.stderr)
         return 1
+
     ppid = os.getppid()
+
     if new:
         clear_thread(ppid)
         history: list[dict[str, str]] = []
     else:
         history = load_thread(ppid)
+
     try:
         status, assistant = _answer_turn(
-            client, question, history, runner, chooser, reader, editor, variant
+            client,
+            question,
+            history,
+            runner,
+            chooser,
+            reader,
+            editor,
+            variant,
         )
     except ModelClientError as exc:
         print(f"tux: {exc}", file=sys.stderr)
         return 1
-    save_thread(ppid, [*history, {"role": "user", "content": question}, assistant])
+
+    save_thread(
+        ppid,
+        [*history, {"role": "user", "content": question}, assistant],
+    )
+
     return status
 
 
@@ -116,11 +132,14 @@ def _answer_turn(
 ) -> tuple[int, dict[str, str]]:
     """Route, present, and return one assistant turn."""
     lite = _lite_active(variant)
+
     with thinking():
         route = client.classify(question, history)
+
     if route == "command":
         with thinking():
             plan = client.suggest(question, history)
+
         status, final_plan = present_command(
             client,
             question,
@@ -132,10 +151,14 @@ def _answer_turn(
             editor,
             lite=lite,
         )
+
         return status, assistant_turn(final_plan)
+
     answer = stream_reply(client.converse_stream(question, history))
+
     if lite:
         print(f"\n{LITE_STEER}")
+
     return 0, {"role": "assistant", "content": answer}
 
 
@@ -151,29 +174,46 @@ def run_session(
         try:
             with managed_local_runtime():
                 return run_session(
-                    ModelClient.from_config(), runner, chooser, reader, editor
+                    ModelClient.from_config(),
+                    runner,
+                    chooser,
+                    reader,
+                    editor,
                 )
         except (ConfigError, OSError, subprocess.CalledProcessError, RuntimeError) as exc:
             print(f"tux: {exc}", file=sys.stderr)
             return 1
+
     try:
         lite = _lite_active(_resolve_variant())
     except ConfigError as exc:
         print(f"tux: {exc}", file=sys.stderr)
         return 1
+
+    
     print(SESSION_INTRO)
-    history: list[dict[str, str]] = []
+    ppid = os.getppid()
+    history = load_thread(ppid)
+
     while True:
         try:
             line = input(SESSION_PROMPT)
         except EOFError:
             print()
+            if history:
+                save_thread(ppid, history)
             return 0
+
         question = line.strip()
+
         if not question:
             continue
+
         if question.lower() in EXIT_WORDS:
+            if history:
+                save_thread(ppid, history)
             return 0
+
         try:
             _, assistant = _answer_turn(
                 client,
@@ -188,5 +228,6 @@ def run_session(
         except ModelClientError as exc:
             print(f"tux: {exc}", file=sys.stderr)
             continue
+
         history.append({"role": "user", "content": question})
         history.append(assistant)

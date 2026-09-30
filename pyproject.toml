@@ -7,6 +7,10 @@ name = "tux"
 version = "0.2.0"
 description = "Terminal-native Linux assistant"
 requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary]>=3.2",
+    "pgvector>=0.4",
+]
 
 [project.scripts]
 tux = "tux.cli.main:main"
