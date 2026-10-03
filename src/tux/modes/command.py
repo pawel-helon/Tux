@@ -38,7 +38,12 @@ BASE_SYSTEM_PROMPT = (
     "than hiding the context in one compound command. A later step may use a "
     "{placeholder} that an earlier step's output fills in. Do not propose a command "
     "such as 'cat ~/etc/{placeholder}/*'; use the previous step's actual output. "
-    "A simple lookup that needs only one command is a single-step plan. When you are "
+    "Only add a discovery step when a later command depends on information from it; "
+    "do not add 'pwd' to unrelated tasks. A simple lookup that needs only one command "
+    "is a single-step plan. On conventional Linux, the machine ID is stored in "
+    "/etc/machine-id, so print it with 'cat /etc/machine-id'; do not use hostnamectl "
+    "hostname options as a substitute. When the environment is Termux, do not assume "
+    "that /etc/machine-id exists. When you are "
     "given the output of a step the user just ran, or a clarification, return the "
     "revised remaining steps only."
 )

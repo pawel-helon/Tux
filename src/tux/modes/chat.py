@@ -18,19 +18,25 @@ from tux.system import chat_context, explain_context
 #: Routing needs only a single word back; conversational replies need room for a
 #: short paragraph. An explain answer teaches the *why* behind a command, so it
 #: gets the same room as a conversational reply.
-CLASSIFY_MAX_TOKENS = 4
+CLASSIFY_MAX_TOKENS = 8
 CHAT_MAX_TOKENS = 512
 EXPLAIN_MAX_TOKENS = 512
 
 #: Prompt for the lightweight routing call that decides a turn's type before the
-#: real answer is produced. It must reply with exactly one of two words.
+#: real answer is produced. It also identifies requests that need earlier-session
+#: context, using the existing route decision rather than another classifier.
 CLASSIFY_PROMPT = (
     "You route messages for a Linux assistant. Read the user's latest message in "
-    "the context of the conversation and decide its type. Reply with exactly one "
-    "word and nothing else: COMMAND if it asks to do something on the system that "
-    "is best answered with a shell command, or CHAT if it is ordinary "
-    "conversation (a greeting, a question about the conversation itself, or a "
-    "request for an explanation)."
+    "the current conversation and choose one route. Reply with exactly one token: "
+    "COMMAND for a system task best answered with a shell command; CHAT for "
+    "ordinary conversation; MEMORY_COMMAND when answering requires details from a "
+    "previous, separate Tux session and the answer is a system command; or "
+    "MEMORY_CHAT when answering requires details from a previous, separate Tux "
+    "session and the answer is conversational. An explicit reference to a "
+    "previous session takes priority over CHAT: always choose a MEMORY route for "
+    "questions like 'What did I ask you last time?', 'What was that shortcut "
+    "again?', or 'What did we decide in our previous conversation?' Do not use a "
+    "MEMORY route when the current conversation already supplies the context."
 )
 
 #: System prompt for a free-form conversational turn. No shell command is
@@ -107,12 +113,17 @@ def explain_request(
 
 
 def interpret_route(reply: str) -> str:
-    """Map the router's reply to ``"command"`` or ``"chat"``.
+    """Map the router's reply to command/chat and optional-memory route names.
 
     Anything that is not an explicit command vote falls back to ``"chat"`` so a
     stray word never forces an unwanted command proposal.
     """
-    return "command" if "COMMAND" in reply.strip().upper() else "chat"
+    route = reply.strip().upper().replace("-", "_")
+    if "MEMORY_COMMAND" in route:
+        return "memory_command"
+    if "MEMORY_CHAT" in route:
+        return "memory_chat"
+    return "command" if "COMMAND" in route else "chat"
 
 
 def _build_payload(

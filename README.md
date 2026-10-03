@@ -58,6 +58,15 @@ Ask a question:
 
 tux ask "How do I update my system?"
 
+Tux keeps recent raw conversations in `/tmp/tux/memory.json` so a new session can
+answer follow-ups about earlier sessions. Entries expire after 30 days by default;
+set `TUX_SHORT_TERM_MEMORY_RETENTION_SECONDS` to change the retention period.
+Completed sessions are also summarized and stored in the local `tux` PostgreSQL
+database. Semantic historical recall uses the local `embeddinggemma` model and
+pgvector; PostgreSQL memory is consulted only for requests classified as needing
+previous-session context, and only after short-term search finds no match. Set
+`TUX_MEMORY_MAX_DISTANCE` to tune the maximum cosine distance accepted for recall.
+
 Display help:
 
 tux --help

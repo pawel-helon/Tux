@@ -13,12 +13,10 @@ from .parser import build_parser
 from .session.main import (
     ClarifyReader,
     EditReader,
-    _default_edit_reader,
-    _default_reader,
-    _interactive,
     run_ask,
     run_session,
 )
+from .session.interaction import default_edit_reader, default_reader, interactive
 
 
 def main(
@@ -26,8 +24,8 @@ def main(
     client: ModelClient | None = None,
     runner: CommandRunner = run_command,
     chooser: Chooser = select,
-    reader: ClarifyReader = _default_reader,
-    editor: EditReader = _default_edit_reader,
+    reader: ClarifyReader = default_reader,
+    editor: EditReader = default_edit_reader,
 ) -> int:
     """Run the ``tux`` command-line interface."""
     parser = build_parser()
@@ -40,7 +38,6 @@ def main(
         return run_ask(
             args.question,
             client,
-            new=args.new,
             runner=runner,
             chooser=chooser,
             reader=reader,
@@ -49,7 +46,7 @@ def main(
     if args.command == "config":
         return run_config(args)
     if args.command == "provision":
-        return run_provision(args, interactive=_interactive)
+        return run_provision(args, interactive=interactive)
     if args.command == "history":
         return run_history(args, runner=runner, chooser=chooser)
     parser.print_help()

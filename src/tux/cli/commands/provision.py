@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable
 
 from tux.config import ConfigError
-from tux.provisioning.main import ProvisionResult, provision
+from tux.provisioning import ProvisionResult, provision
 
 InteractiveProbe = Callable[[], bool]
 
@@ -73,4 +73,3 @@ def _print_provision_result(result: ProvisionResult) -> None:
         f"Config now points at {result.endpoint} "
         f"(model {result.model}, system {result.system})."
     )
-

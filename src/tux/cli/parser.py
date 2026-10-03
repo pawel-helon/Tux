@@ -69,12 +69,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="The plain-English question to ask tux. Omit it to start an "
         "interactive session where you can ask follow-up questions.",
     )
-    ask_parser.add_argument(
-        "--new",
-        action="store_true",
-        help="Start a fresh conversation in this terminal, discarding any prior "
-        "context from earlier questions in this shell.",
-    )
     _add_config_parser(subparsers)
     _add_provision_parser(subparsers)
     _add_history_parser(subparsers)
@@ -172,4 +166,3 @@ def _add_history_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Empty the run log, discarding every recorded run.",
     )
-

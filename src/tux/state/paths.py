@@ -14,11 +14,6 @@ def state_dir() -> Path:
     return root / "tux"
 
 
-def thread_path(ppid: int) -> Path:
-    """Return the thread file path for the shell identified by ``ppid``."""
-    return state_dir() / "threads" / f"{ppid}.json"
-
-
 def log_path() -> Path:
     """Return the path of tux's command run log under the state directory."""
     return state_dir() / "history.log"

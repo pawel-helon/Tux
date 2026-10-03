@@ -1,6 +1,5 @@
 """One-shot and interactive conversation orchestration."""
 
-import os
 import subprocess
 import sys
 
@@ -8,41 +7,38 @@ from tux.chooser import Chooser, select
 from tux.client import DEFAULT_VARIANT, ModelClient, ModelClientError
 from tux.config import ConfigError, load_config
 from tux.modes.command import assistant_turn
-from tux.provisioning.main import managed_local_runtime
+from tux.provisioning import managed_local_runtime
 from tux.runner import CommandRunner, run_command
-from tux.state import clear_thread, load_thread, save_thread
 from tux.thinking import thinking
 from tux.cli.session.interaction import (
     ClarifyReader,
     EditReader,
     default_edit_reader,
     default_reader,
-    interactive,
 )
-from tux.cli.session.plan import present_command, present_single_command
+from tux.cli.session.plan import present_command
 from tux.cli.session.streaming import stream_reply
+from tux.cli.session.state import Session
+from tux.state.short_term_memory import (
+    references_recent_session,
+    retrieve,
+    retrieved_context,
+    save_session,
+)
+from tux.state.threads import historical_context, persist_session, retrieve_long_term
 
 SESSION_PROMPT = "you: "
 SESSION_INTRO = (
     "tux interactive session. Ask a question, then ask follow-ups in context.\n"
-    "Press Ctrl-D or type 'exit' to quit."
+    "Type 'exit' to quit."
 )
-EXIT_WORDS = frozenset({"exit", "quit"})
+EXIT_WORDS = frozenset({"exit"})
 LITE_VARIANT = "lite"
 FEATURES_ALL_ON = True
 LITE_STEER = (
     "tux works best when you ask it for a command — for example: "
     'tux ask "how do I find the largest files in this folder?"'
 )
-
-# Compatibility aliases retained for callers that imported session internals.
-_default_reader = default_reader
-_default_edit_reader = default_edit_reader
-_interactive = interactive
-_present_single_command = present_single_command
-_stream_reply = stream_reply
-_present_command = present_command
-
 
 def _lite_active(variant: str) -> bool:
     """Return whether lite lookup-only behavior is active."""
@@ -60,20 +56,18 @@ def run_ask(
     question: str,
     client: ModelClient | None = None,
     *,
-    new: bool = False,
     runner: CommandRunner = run_command,
     chooser: Chooser = select,
     reader: ClarifyReader = default_reader,
     editor: EditReader = default_edit_reader,
 ) -> int:
-    """Answer one ``tux ask`` turn, carrying context across invocations."""
+    """Answer one question in a fresh Tux session."""
     if client is None:
         try:
             with managed_local_runtime():
                 return run_ask(
                     question,
                     ModelClient.from_config(),
-                    new=new,
                     runner=runner,
                     chooser=chooser,
                     reader=reader,
@@ -89,19 +83,13 @@ def run_ask(
         print(f"tux: {exc}", file=sys.stderr)
         return 1
 
-    ppid = os.getppid()
-
-    if new:
-        clear_thread(ppid)
-        history: list[dict[str, str]] = []
-    else:
-        history = load_thread(ppid)
+    session = Session()
 
     try:
         status, assistant = _answer_turn(
             client,
             question,
-            history,
+            session.history,
             runner,
             chooser,
             reader,
@@ -112,12 +100,21 @@ def run_ask(
         print(f"tux: {exc}", file=sys.stderr)
         return 1
 
-    save_thread(
-        ppid,
-        [*history, {"role": "user", "content": question}, assistant],
-    )
-
+    session.add_turn(question, assistant)
+    save_session(session)
+    _persist_completed_session(client, session)
     return status
+
+
+def _persist_completed_session(client: ModelClient, session: Session) -> None:
+    """Finalize long-term memory without making it a requirement for Tux."""
+    if not session.history:
+        return
+    try:
+        title, summary = client.summarize_conversation(session.history)
+        persist_session(session, title, summary)
+    except Exception as exc:
+        print(f"tux: could not save long-term memory: {exc}", file=sys.stderr)
 
 
 def _answer_turn(
@@ -135,15 +132,29 @@ def _answer_turn(
 
     with thinking():
         route = client.classify(question, history)
+    model_history = history
+    memory_route = route.startswith("memory_")
+    if memory_route or references_recent_session(question):
+        short_term = retrieve(question)
+        memory_context = retrieved_context(short_term)
+        if memory_context is None:
+            try:
+                memory_context = historical_context(retrieve_long_term(question))
+            except Exception as exc:
+                # Historical recall is optional; keep normal answering available.
+                print(f"tux: long-term memory unavailable: {exc}", file=sys.stderr)
+        if memory_context is not None:
+            model_history = [memory_context, *history]
+        route = route.removeprefix("memory_")
 
     if route == "command":
         with thinking():
-            plan = client.suggest(question, history)
+            plan = client.suggest(question, model_history)
 
         status, final_plan = present_command(
             client,
             question,
-            history,
+            model_history,
             plan,
             runner,
             chooser,
@@ -154,7 +165,7 @@ def _answer_turn(
 
         return status, assistant_turn(final_plan)
 
-    answer = stream_reply(client.converse_stream(question, history))
+    answer = stream_reply(client.converse_stream(question, model_history))
 
     if lite:
         print(f"\n{LITE_STEER}")
@@ -190,18 +201,16 @@ def run_session(
         print(f"tux: {exc}", file=sys.stderr)
         return 1
 
-    
+    session = Session()
     print(SESSION_INTRO)
-    ppid = os.getppid()
-    history = load_thread(ppid)
 
     while True:
         try:
             line = input(SESSION_PROMPT)
         except EOFError:
             print()
-            if history:
-                save_thread(ppid, history)
+            save_session(session)
+            _persist_completed_session(client, session)
             return 0
 
         question = line.strip()
@@ -210,15 +219,15 @@ def run_session(
             continue
 
         if question.lower() in EXIT_WORDS:
-            if history:
-                save_thread(ppid, history)
+            save_session(session)
+            _persist_completed_session(client, session)
             return 0
 
         try:
             _, assistant = _answer_turn(
                 client,
                 question,
-                history,
+                session.history,
                 runner,
                 chooser,
                 reader,
@@ -229,5 +238,5 @@ def run_session(
             print(f"tux: {exc}", file=sys.stderr)
             continue
 
-        history.append({"role": "user", "content": question})
-        history.append(assistant)
+        session.add_turn(question, assistant)
+        save_session(session)

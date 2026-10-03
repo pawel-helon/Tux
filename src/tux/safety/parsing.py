@@ -56,11 +56,3 @@ def has_flag(
             if any(letter in arg[1:] for letter in short_letters):
                 return True
     return False
-
-
-# Compatibility aliases for the former private helpers.
-_tokenise = tokenise
-_segments = segments
-_strip_privilege_prefix = strip_privilege_prefix
-_command_name = command_name
-_has_flag = has_flag

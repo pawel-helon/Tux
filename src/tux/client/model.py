@@ -52,7 +52,7 @@ class ModelClient:
     def classify(
         self, question: str, history: list[dict[str, str]] | None = None
     ) -> str:
-        """Return ``command`` or ``chat`` for the latest turn."""
+        """Return a command/chat route, optionally marked for prior-session memory."""
         payload = chat.build_classify_payload(self._model, question, history or [])
         return chat.interpret_route(self._stream_text(payload))
 
@@ -83,6 +83,38 @@ class ModelClient:
         return self._stream_prose(
             chat.build_explain_payload(self._model, self._system, question, history or [])
         )
+
+    def summarize_conversation(self, history: list[dict[str, str]]) -> tuple[str, str]:
+        """Generate a concise title and practical summary for completed memory."""
+        transcript = "\n".join(
+            f"{turn['role']}: {turn['content']}" for turn in history
+            if turn.get("role") in {"user", "assistant"}
+        )
+        payload = {
+            "model": self._model,
+            "stream": True,
+            "max_tokens": 180,
+            "reasoning_effort": "none",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Summarize this conversation for future retrieval. Describe its actual "
+                        "subject, useful answers, and decisions. Avoid boilerplate and do not "
+                        "describe the assistant's role. Output exactly two lines: Title: ... "
+                        "then Summary: ..."
+                    ),
+                },
+                {"role": "user", "content": transcript},
+            ],
+        }
+        lines = [line.strip() for line in self._stream_text(payload).splitlines() if line.strip()]
+        if len(lines) < 2 or not lines[0].lower().startswith("title:") or not lines[1].lower().startswith("summary:"):
+            raise ModelClientError("could not generate a title and summary for conversation memory")
+        title, summary = lines[0][6:].strip(), lines[1][8:].strip()
+        if not title or not summary:
+            raise ModelClientError("conversation memory title or summary was empty")
+        return title, summary
 
     def _stream_prose(self, payload: dict) -> Iterator[str]:
         return stream_prose(

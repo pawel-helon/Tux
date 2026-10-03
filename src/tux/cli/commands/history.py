@@ -53,9 +53,9 @@ def _history_list(limit: int | None) -> int:
     numbered = list(enumerate(records, start=1))
     if limit is not None:
         numbered = numbered[-limit:] if limit > 0 else []
-    from tux.cli.session import _interactive
+    from tux.cli.session.interaction import interactive
 
-    styled = _interactive()
+    styled = interactive()
     for number, record in numbered:
         _print_history_entry(number, record, styled=styled)
     return 0
@@ -107,9 +107,9 @@ def _history_rerun(reference: str, runner: CommandRunner, chooser: Chooser) -> i
         command=record.command,
         description=record.description,
     )
-    from tux.cli.session import _present_single_command
+    from tux.cli.session.plan import present_single_command
 
-    status, _ = _present_single_command([suggestion], runner, chooser)
+    status, _ = present_single_command([suggestion], runner, chooser)
     return status
 
 def _parse_reference(reference: str) -> int | None:
@@ -125,4 +125,3 @@ def _parse_reference(reference: str) -> int | None:
         return None
     value = int(text)
     return value if value > 0 else None
-

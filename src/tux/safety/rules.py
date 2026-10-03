@@ -76,8 +76,3 @@ def writes_block_device(segment: list[str]) -> bool:
         if _BLOCK_DEVICE.match(target):
             return True
     return False
-
-
-_is_fork_bomb = is_fork_bomb
-_segment_reason = segment_reason
-_writes_block_device = writes_block_device
